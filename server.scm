@@ -47,6 +47,22 @@
     (print-error-message e port headstr)
     (display chain port)))
 
+;;If openssl is installed the someone might try to use it.
+;;Better make sure we have it.
+(define (dynamic-import module symbol default)
+  (handle-exceptions _ default (eval `(let () (use ,module) ,symbol))))
+
+(define ssl-port?
+  (dynamic-import 'openssl 'ssl-port? (lambda (v) #f)))
+
+(define ssl-port->tcp-port
+  (dynamic-import
+    'openssl 'ssl-port->tcp-port
+    (lambda (v) (error 'ssl-port->tcp-port "Expected an SSL port" v))))
+
+(define (ssl-or-tcp-addresses p)
+  (tcp-addresses (if (ssl-port? p) (ssl-port->tcp-port p) p)))
+
 (define (accept-loop request-handler)
   (let* ((thread-count (make-mutex/value 'thread-count 0))
          (thread-stopped! (make-condition-variable 'thread-stopped!))
@@ -62,7 +78,7 @@
       ;; TODO: leave this exception handling to embedding applications?
       (condition-case
         (let*-values (((in out) ((server-accepter) (server-listener)))
-                      ((local remote) (tcp-addresses in)))
+                      ((local remote) (ssl-or-tcp-addresses in)))
           (mutex-update! thread-count add1)
           (thread-start!
             (make-thread
