@@ -4,6 +4,7 @@
 
 (;; server
  http-listen
+ accept-loop
  max-connections
  server-port
  server-bind-address
