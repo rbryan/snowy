@@ -3,6 +3,8 @@
 (define snowy-buffer-size   (make-parameter 1024))
 (define server-port         (make-parameter 8080))
 (define server-bind-address (make-parameter #f))
+(define server-listener     (make-parameter #f))
+(define server-accepter     (make-parameter #f))
 
 
 (define (handle-another-request? req res in out)
@@ -45,7 +47,7 @@
     (print-error-message e port headstr)
     (display chain port)))
 
-(define (accept-loop listener f)
+(define (accept-loop request-handler)
   (let* ((thread-count (make-mutex/value 'thread-count 0))
          (thread-stopped! (make-condition-variable 'thread-stopped!))
          (cleanup-thread (lambda ()
@@ -59,7 +61,7 @@
                    thread-stopped!)
       ;; TODO: leave this exception handling to embedding applications?
       (condition-case
-        (let*-values (((in out) (tcp-accept listener))
+        (let*-values (((in out) ((server-accepter) (server-listener)))
                       ((local remote) (tcp-addresses in)))
           (mutex-update! thread-count add1)
           (thread-start!
@@ -73,16 +75,18 @@
                         (close-connection in out)
                         (free-connection conn)
                         #f)
-                    (connection-loop conn in out local remote f))
+                    (connection-loop conn in out local remote request-handler))
                   (cleanup-thread))))))
         (e (exn i/o net)
            (print-thread-error e "Connection handshake error")))
       (loop))))
 
-(define (http-listen f #!key (port (server-port))
+(define (http-listen request-handler #!key (port (server-port))
                              (bind-address (server-bind-address)))
   (let ((listener (tcp-listen port 100 bind-address)))
     (parameterize ((server-port port)
                    (server-bind-address bind-address)
-                   (tcp-buffer-size (snowy-buffer-size)))
-      (accept-loop listener f))))
+                   (tcp-buffer-size (snowy-buffer-size))
+                   (server-listener listener)
+                   (server-accepter tcp-accept))
+      (accept-loop request-handler))))
